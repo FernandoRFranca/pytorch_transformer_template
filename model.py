@@ -21,7 +21,7 @@ class PositionalEncoding(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.seq_len = seq_len # max sentence length
-        self.dropout = dropout
+        self.dropout = nn.Dropout(dropout)
 
         pe = torch.zeros(seq_len, d_model)
     
@@ -36,7 +36,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', pe)
 
     def forward(self, x):
-        x = x + (self.pe[:, :x.shape[1], :]).requires_grad(False)
+        x = x + (self.pe[:, :x.shape[1], :]).requires_grad_(False) # (batch, seq_len, d_model)
         return self.dropout(x)
 
 
@@ -122,7 +122,7 @@ class ResidualConnection(nn.Module):
         self.norm = LayerNormalization()
 
     def forward(self, x, sublayer):
-        return x + self.dropout(sublayer)
+        return x + self.dropout(sublayer(self.norm(x)))
     
 class EncoderBlock(nn.Module):
 
@@ -209,7 +209,7 @@ class Transformer(nn.Module):
     
     def decode(self, encoder_output, src_mask, tgt, tgt_mask):
         tgt = self.tgt_embed(tgt)
-        tgt = self.tgt_post(tgt)
+        tgt = self.tgt_pos(tgt)
         return self.decoder(tgt, encoder_output, src_mask, tgt_mask)
     
     def project(self, x):

@@ -164,3 +164,9 @@ env/
 
 # Dataset folder
 dataset/
+
+# Runs
+runs/
+
+# Weights folder
+opus_books_weights/
