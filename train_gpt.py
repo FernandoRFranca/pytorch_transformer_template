@@ -31,12 +31,12 @@ def train_gpt():
 
     # Initialize the tokenizer and train it
     print("Training the tokenizer...")
-    tokenizer = TokenizerGPT(vocab_size=40000)
+    tokenizer = TokenizerGPT(vocab_size=50000)
     tokenizer.train([data_path])
 
     # Initialize the model
     print("Initializing the model...")
-    model = GPT(vocab_size=40000, d_model=512, nhead=8, num_layers=6)
+    model = GPT(vocab_size=50000, d_model=512, nhead=8, num_layers=6)
     model = model.to('cuda' if torch.cuda.is_available() else 'cpu')  # Move model to GPU if available
 
     # Initialize the dataset
@@ -54,7 +54,7 @@ def train_gpt():
 
     # Initialize the optimizer
     print("Initializing the optimizer...")
-    optimizer = Adam(model.parameters(), lr=10**-3, eps=1e-9)
+    optimizer = Adam(model.parameters(), lr=10**-4, eps=1e-9)
 
     # Initialize the loss function
     print("Initializing the loss function...")
