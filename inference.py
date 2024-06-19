@@ -3,7 +3,7 @@ import os
 import torch
 import torchmetrics
 
-from train import greedy_decode
+from train_transformer import greedy_decode
 
 
 def predict(model, inference_ds, tokenizer_tgt, max_len, device, print_msg, global_step, writer, num_examples=2):

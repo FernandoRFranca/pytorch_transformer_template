@@ -262,11 +262,19 @@ def build_transformer(src_vocab_size: int, tgt_vocab_size: int, src_seq_len: int
 class GPT(nn.Module):
     def __init__(self, vocab_size, d_model, nhead, num_layers):
         super(GPT, self).__init__()
-        self.transformer = nn.Transformer(d_model, nhead, num_layers)
+        self.d_model = d_model
+        self.embedding = nn.Embedding(vocab_size, d_model)
+        self.pos_encoder = PositionalEncoding(d_model)
+        encoder_layer = nn.TransformerEncoderLayer(d_model, nhead)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers)
         self.fc = nn.Linear(d_model, vocab_size)
 
-    def forward(self, x):
-        x = self.transformer(x)
+    def forward(self, src):
+        src = self.embedding(src) * math.sqrt(self.d_model)
+        src = self.pos_encoder(src)
+        mask = (torch.triu(torch.ones(src.size(1), src.size(1))) == 1).transpose(0, 1)
+        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+        x = self.transformer_encoder(src, src_key_padding_mask=mask)
         x = self.fc(x)
         return x
     

@@ -70,7 +70,7 @@ def train_model_gpt():
             tgt = batch[:, 1:]  # All but the first token
 
             # Forward pass
-            outputs = model(src, tgt)
+            outputs = model(src)
 
             # Compute loss
             loss = loss_fn(outputs.view(-1, outputs.size(-1)), tgt.view(-1))
@@ -86,7 +86,9 @@ def train_model_gpt():
         with torch.no_grad():
             for batch in val_loader:
                 batch = batch.to(device)
-                outputs = model(batch)
+                src = batch[:, :-1]  # All but the last token
+                tgt = batch[:, 1:]  # All but the first token
+                outputs = model(src)
                 loss = loss_fn(outputs.view(-1, outputs.size(-1)), batch.view(-1))
                 print(f"Validation Loss: {loss.item()}")
 
