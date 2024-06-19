@@ -292,15 +292,13 @@ class TextDataset(Dataset):
         with open(self.filepath, 'r', encoding='utf-8') as file:
             file.seek(self.offsets[idx])  # Jump to the start of the line
             line = file.readline()
-            tokens = self.tokenizer.encode(line.strip()).ids
+            tokens = self.tokenizer.encode(line.strip())
             tokens = tokens[:self.max_len]  # Truncate to max_len
             return torch.tensor(tokens, dtype=torch.long)
         
 class DataLoaderGPT(DataLoader):
     def __init__(self, dataset, batch_size):
-        super(DataLoaderGPT, self).__init__(dataset, batch_size=batch_size, shuffle=True)
-        self.dataset = dataset
-        self.batch_size = batch_size
+        super().__init__(dataset, batch_size=batch_size)
         self.data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
 class TokenizerGPT:
