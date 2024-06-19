@@ -275,20 +275,21 @@ class TextDataset(Dataset):
         self.filepath = filepath
         self.tokenizer = tokenizer
         self.max_len = max_len
+        self.offsets = []
 
-        with open(filepath, 'r') as file:
+        with open(filepath, 'r', encoding='utf-8') as file:
             offset = 0
             for line in file:
                 self.offsets.append(offset)
                 offset += len(line.encode('utf-8'))  # Get the length of line in bytes
 
     def __len__(self):
-        with open(self.filepath, 'r') as file:
-            lines = sum(1 for line in file)
+        with open(self.filepath, 'r', encoding='utf-8') as file:
+            lines = sum(1 for _ in file)
         return lines
 
     def __getitem__(self, idx):
-        with open(self.filepath, 'r') as file:
+        with open(self.filepath, 'r', encoding='utf-8') as file:
             file.seek(self.offsets[idx])  # Jump to the start of the line
             line = file.readline()
             tokens = self.tokenizer.encode(line.strip()).ids
