@@ -134,8 +134,9 @@ def train_gpt(
         }, f"gpt_weights/checkpoint_{epoch+1}.pt")
 
         # Validation step
+        max_batch_idx = 5
         with torch.no_grad():
-            for batch in val_loader:
+            for batch_idx, batch in enumerate(val_loader):
                 batch = batch.to(device)
                 src = batch[:, :-1]  # All but the last token
                 tgt = batch[:, 1:]  # All but the first token
@@ -149,6 +150,8 @@ def train_gpt(
                 for tokens in predicted_tokens:
                     predicted_words = tokenizer.decode(tokens)
                     print("Predictions:", predicted_words)
+                if batch_idx == max_batch_idx:
+                    break
 
     print("Training complete.")
     return model
@@ -162,8 +165,8 @@ if __name__ == "__main__":
         nhead=8,
         num_layers=6,
         batch_size=8,
-        lr=10-5,
-        sequence_max_len=4096,
-        use_subsampled_dataset=False,
-        n_samples=10000
+        lr=10-4,
+        sequence_max_len=256,
+        use_subsampled_dataset=True,
+        n_samples=100000
     )
