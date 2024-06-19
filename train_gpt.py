@@ -39,7 +39,7 @@ def train_model_gpt():
 
     # Initialize the dataset
     print("Initializing the dataset...")
-    dataset = TextDataset(tokenizer, data_path, max_len=4096)
+    dataset = TextDataset(data_path, tokenizer, max_len=4096)
 
     # Split the dataset into training and validation sets
     print("Splitting the dataset into training and validation sets...")
