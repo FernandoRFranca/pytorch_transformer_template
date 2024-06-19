@@ -28,17 +28,21 @@ def train_model_gpt():
     data_path = "dataset/enwik9.txt"
 
     # Initialize the tokenizer and train it
+    print("Training the tokenizer...")
     tokenizer = TokenizerGPT(vocab_size=50000)
     tokenizer.train([data_path])
 
     # Initialize the model
+    print("Initializing the model...")
     model = GPT(vocab_size=50000, d_model=512, nhead=8, num_layers=6)
     model = model.to('cuda' if torch.cuda.is_available() else 'cpu')  # Move model to GPU if available
 
     # Initialize the dataset
-    dataset = TextDataset(tokenizer, data_path)
+    print("Initializing the dataset...")
+    dataset = TextDataset(tokenizer, data_path, max_len=4096)
 
     # Split the dataset into training and validation sets
+    print("Splitting the dataset into training and validation sets...")
     train_size = int(0.8 * len(dataset))  # 80% for training
     val_size = len(dataset) - train_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
@@ -47,9 +51,11 @@ def train_model_gpt():
     val_loader = DataLoaderGPT(val_dataset, batch_size=32)
 
     # Initialize the optimizer
+    print("Initializing the optimizer...")
     optimizer = Adam(model.parameters())
 
     # Initialize the loss function
+    print("Initializing the loss function...")
     loss_fn = nn.CrossEntropyLoss()
 
     # Define the training loop
