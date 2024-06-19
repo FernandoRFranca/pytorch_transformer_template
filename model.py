@@ -294,7 +294,8 @@ class TextDataset(Dataset):
             line = file.readline()
             tokens = self.tokenizer.encode(line.strip())
             tokens = tokens[:self.max_len]  # Truncate to max_len
-            return torch.tensor(tokens, dtype=torch.long)
+            padded_tokens = tokens + [0]*(self.max_len - len(tokens))
+            return torch.tensor(padded_tokens, dtype=torch.long)
         
 class DataLoaderGPT(DataLoader):
     def __init__(self, dataset, batch_size):

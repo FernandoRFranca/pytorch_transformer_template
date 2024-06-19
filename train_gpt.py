@@ -61,15 +61,19 @@ def train_model_gpt():
     # Define the training loop
     print("Starting training...")
     for epoch in range(10):  # Number of epochs
-        for batch in train_loader:  # Replace with your own data loader
+        for batch in train_loader:
             # Move data to the same device as the model
             batch = batch.to(device)
 
+            # Create src and tgt sequences
+            src = batch[:, :-1]  # All but the last token
+            tgt = batch[:, 1:]  # All but the first token
+
             # Forward pass
-            outputs = model(batch)
+            outputs = model(src, tgt)
 
             # Compute loss
-            loss = loss_fn(outputs.view(-1, outputs.size(-1)), batch.view(-1))
+            loss = loss_fn(outputs.view(-1, outputs.size(-1)), tgt.view(-1))
 
             # Backward pass and optimization
             loss.backward()
