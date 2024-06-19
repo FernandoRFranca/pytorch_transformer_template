@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 import math
 
 
@@ -250,3 +251,15 @@ def build_transformer(src_vocab_size: int, tgt_vocab_size: int, src_seq_len: int
             nn.init.xavier_uniform_(p)
 
     return transformer
+
+
+class GPT(nn.Module):
+    def __init__(self, vocab_size, d_model, nhead, num_layers):
+        super(GPT, self).__init__()
+        self.transformer = nn.Transformer(d_model, nhead, num_layers)
+        self.fc = nn.Linear(d_model, vocab_size)
+
+    def forward(self, x):
+        x = self.transformer(x)
+        x = self.fc(x)
+        return x
