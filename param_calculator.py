@@ -1,10 +1,10 @@
 vocab_size = 50000
-d_model = 512
+d_model = 256
 num_heads = 8
-d_ff = 2048
-num_layers = 6
+d_ff = 2048 // 4
+num_layers = 3
 output_vocab_size = 50000
-sequence_length = 128  # Assuming a sequence length of 100 for positional encoding
+sequence_length = 32  # Assuming a sequence length of 100 for positional encoding
 
 
 # Function to estimate the number of parameters in the model
