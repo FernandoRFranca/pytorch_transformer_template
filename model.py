@@ -1,6 +1,12 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from tokenizers import Tokenizer
+from tokenizers.models import BPE
+from tokenizers.trainers import BpeTrainer
+from tokenizers.pre_tokenizers import Whitespace
+from torch.utils.data import Dataset, DataLoader
+
 import math
 
 
@@ -263,3 +269,59 @@ class GPT(nn.Module):
         x = self.transformer(x)
         x = self.fc(x)
         return x
+    
+class TextDataset(Dataset):
+    def __init__(self, filepath, tokenizer, max_len):
+        self.filepath = filepath
+        self.tokenizer = tokenizer
+        self.max_len = max_len
+
+        with open(filepath, 'r') as file:
+            offset = 0
+            for line in file:
+                self.offsets.append(offset)
+                offset += len(line.encode('utf-8'))  # Get the length of line in bytes
+
+    def __len__(self):
+        with open(self.filepath, 'r') as file:
+            lines = sum(1 for line in file)
+        return lines
+
+    def __getitem__(self, idx):
+        with open(self.filepath, 'r') as file:
+            file.seek(self.offsets[idx])  # Jump to the start of the line
+            line = file.readline()
+            tokens = self.tokenizer.encode(line.strip()).ids
+            tokens = tokens[:self.max_len]  # Truncate to max_len
+            return torch.tensor(tokens, dtype=torch.long)
+        
+class DataLoaderGPT(DataLoader):
+    def __init__(self, dataset, batch_size):
+        super(DataLoaderGPT, self).__init__(dataset, batch_size=batch_size, shuffle=True)
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+class TokenizerGPT:
+    def __init__(self, vocab_size):
+        self.vocab_size = vocab_size
+
+    def train(self, files_list):
+        model = BPE()
+
+        trainer = BpeTrainer(special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"])
+        
+        pre_tokenizer = Whitespace()
+
+        tokenizer = Tokenizer(model)
+        tokenizer.pre_tokenizer = pre_tokenizer
+
+        tokenizer.train(files_list, trainer)
+
+        self.tokenizer = tokenizer
+
+    def encode(self, text):
+        return self.tokenizer.encode(text).ids
+
+    def decode(self, tokens):
+        return self.tokenizer.decode(tokens)
