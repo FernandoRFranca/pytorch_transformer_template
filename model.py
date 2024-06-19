@@ -6,6 +6,7 @@ from tokenizers.models import BPE
 from tokenizers.trainers import BpeTrainer
 from tokenizers.pre_tokenizers import Whitespace
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.checkpoint import checkpoint
 
 import math
 
@@ -264,7 +265,7 @@ class GPT(nn.Module):
         super(GPT, self).__init__()
         self.d_model = d_model
         self.embedding = nn.Embedding(vocab_size, d_model)
-        self.pos_encoder = PositionalEncoding(d_model)
+        self.pos_encoder = PositionalEncodingGPT(d_model)
         encoder_layer = nn.TransformerEncoderLayer(d_model, nhead)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers)
         self.fc = nn.Linear(d_model, vocab_size)
@@ -272,12 +273,36 @@ class GPT(nn.Module):
     def forward(self, src):
         src = self.embedding(src) * math.sqrt(self.d_model)
         src = self.pos_encoder(src)
-        mask = (torch.triu(torch.ones(src.size(1), src.size(1))) == 1).transpose(0, 1)
-        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
-        x = self.transformer_encoder(src, src_key_padding_mask=mask)
-        x = self.fc(x)
+
+        attn_mask = (torch.triu(torch.ones(src.size(1), src.size(1))) == 1).transpose(0, 1)
+        attn_mask = attn_mask.float().masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, float(0.0))
+
+        src_2d = src[:, :, 0].transpose(0, 1)
+        key_padding_mask = (src_2d == 0)
+
+        x = self.transformer_encoder(src, src_key_padding_mask=key_padding_mask)
+        x = checkpoint(self.fc, x)
         return x
     
+
+class PositionalEncodingGPT(nn.Module):
+    def __init__(self, d_model, dropout=0.1, max_len=5000):
+        super(PositionalEncodingGPT, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)
+    
+
 class TextDataset(Dataset):
     def __init__(self, filepath, tokenizer, max_len):
         self.filepath = filepath
@@ -305,10 +330,12 @@ class TextDataset(Dataset):
             padded_tokens = tokens + [0]*(self.max_len - len(tokens))
             return torch.tensor(padded_tokens, dtype=torch.long)
         
+
 class DataLoaderGPT(DataLoader):
-    def __init__(self, dataset, batch_size):
+    def __init__(self, dataset, batch_size, shuffle=True):
         super().__init__(dataset, batch_size=batch_size)
-        self.data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        self.data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+
 
 class TokenizerGPT:
     def __init__(self, vocab_size):

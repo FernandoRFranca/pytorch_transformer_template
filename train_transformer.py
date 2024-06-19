@@ -177,7 +177,7 @@ def get_model(config, vocab_src_len, vocab_tgt_len):
     model = build_transformer(vocab_src_len, vocab_tgt_len, config["seq_len"], config['seq_len'], d_model=config['d_model'])
     return model
 
-def train_model(config):
+def train_transformer(config):
     # Define the device
     device = "cuda" if torch.cuda.is_available() else "mps" if torch.has_mps or torch.backends.mps.is_available() else "cpu"
     print("Using device:", device)
@@ -271,4 +271,4 @@ def train_model(config):
 if __name__ == '__main__':
     warnings.filterwarnings("ignore")
     config = get_config()
-    train_model(config)
+    train_transformer(config)

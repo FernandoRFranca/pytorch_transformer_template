@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from torch.optim import Adam
 from torch.utils.data.dataset import random_split
+from tqdm import tqdm
 
 from model import GPT, TokenizerGPT, TextDataset, DataLoaderGPT
 
@@ -9,7 +10,7 @@ from model import GPT, TokenizerGPT, TextDataset, DataLoaderGPT
 torch.manual_seed(42)
 
 
-def train_model_gpt():
+def train_gpt():
     # Set the device
     # Define the device
     device = "cuda" if torch.cuda.is_available() else "mps" if torch.has_mps or torch.backends.mps.is_available() else "cpu"
@@ -17,6 +18,7 @@ def train_model_gpt():
     if (device == 'cuda'):
         print(f"Device name: {torch.cuda.get_device_name(device.index)}")
         print(f"Device memory: {torch.cuda.get_device_properties(device.index).total_memory / 1024 ** 3} GB")
+        torch.cuda.empty_cache()
     elif (device == 'mps'):
         print(f"Device name: <mps>")
     else:
@@ -29,17 +31,17 @@ def train_model_gpt():
 
     # Initialize the tokenizer and train it
     print("Training the tokenizer...")
-    tokenizer = TokenizerGPT(vocab_size=50000)
+    tokenizer = TokenizerGPT(vocab_size=40000)
     tokenizer.train([data_path])
 
     # Initialize the model
     print("Initializing the model...")
-    model = GPT(vocab_size=50000, d_model=512, nhead=8, num_layers=6)
+    model = GPT(vocab_size=40000, d_model=512, nhead=8, num_layers=6)
     model = model.to('cuda' if torch.cuda.is_available() else 'cpu')  # Move model to GPU if available
 
     # Initialize the dataset
     print("Initializing the dataset...")
-    dataset = TextDataset(data_path, tokenizer, max_len=4096)
+    dataset = TextDataset(data_path, tokenizer, max_len=128)
 
     # Split the dataset into training and validation sets
     print("Splitting the dataset into training and validation sets...")
@@ -47,12 +49,12 @@ def train_model_gpt():
     val_size = len(dataset) - train_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
-    train_loader = DataLoaderGPT(train_dataset, batch_size=32)
-    val_loader = DataLoaderGPT(val_dataset, batch_size=32)
+    train_loader = DataLoaderGPT(train_dataset, batch_size=8, shuffle=True)
+    val_loader = DataLoaderGPT(val_dataset, batch_size=1, shuffle=False)
 
     # Initialize the optimizer
     print("Initializing the optimizer...")
-    optimizer = Adam(model.parameters())
+    optimizer = Adam(model.parameters(), lr=10**-3, eps=1e-9)
 
     # Initialize the loss function
     print("Initializing the loss function...")
@@ -61,7 +63,9 @@ def train_model_gpt():
     # Define the training loop
     print("Starting training...")
     for epoch in range(10):  # Number of epochs
-        for batch in train_loader:
+        torch.cuda.empty_cache()
+        batch_iterator = tqdm(train_loader, desc=f"Processing Epoch {epoch:02d}")
+        for batch in batch_iterator:
             # Move data to the same device as the model
             batch = batch.to(device)
 
@@ -73,7 +77,7 @@ def train_model_gpt():
             outputs = model(src)
 
             # Compute loss
-            loss = loss_fn(outputs.view(-1, outputs.size(-1)), tgt.view(-1))
+            loss = loss_fn(outputs.reshape(-1, outputs.size(-1)), tgt.reshape(-1))
 
             # Backward pass and optimization
             loss.backward()
@@ -89,7 +93,7 @@ def train_model_gpt():
                 src = batch[:, :-1]  # All but the last token
                 tgt = batch[:, 1:]  # All but the first token
                 outputs = model(src)
-                loss = loss_fn(outputs.view(-1, outputs.size(-1)), batch.view(-1))
+                loss = loss_fn(outputs.reshape(-1, outputs.size(-1)), tgt.reshape(-1))
                 print(f"Validation Loss: {loss.item()}")
 
                 # Print out some predictions
@@ -109,4 +113,4 @@ def train_model_gpt():
 
 
 if __name__ == "__main__":
-    train_model_gpt()
+    train_gpt()
