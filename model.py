@@ -266,22 +266,28 @@ class GPT(nn.Module):
         self.d_model = d_model
         self.embedding = nn.Embedding(vocab_size, d_model)
         self.pos_encoder = PositionalEncodingGPT(d_model)
-        encoder_layer = nn.TransformerEncoderLayer(d_model, nhead)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers)
+        decoder_layer = nn.TransformerDecoderLayer(d_model, nhead)
+        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers)
         self.fc = nn.Linear(d_model, vocab_size)
 
-    def forward(self, src):
-        src = self.embedding(src) * math.sqrt(self.d_model)
-        src = self.pos_encoder(src)
+        # Initialize weights
+        self._init_weights()
 
-        attn_mask = (torch.triu(torch.ones(src.size(1), src.size(1))) == 1).transpose(0, 1)
-        attn_mask = attn_mask.float().masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, float(0.0))
+    def _init_weights(self):
+        initrange = 0.1
+        self.embedding.weight.data.uniform_(-initrange, initrange)
+        self.fc.bias.data.zero_()
+        self.fc.weight.data.uniform_(-initrange, initrange)
 
-        src_2d = src[:, :, 0].transpose(0, 1)
-        key_padding_mask = (src_2d == 0)
+    def forward(self, tgt):
+        tgt = self.embedding(tgt) * math.sqrt(self.d_model)
+        tgt = self.pos_encoder(tgt)
 
-        x = self.transformer_encoder(src, src_key_padding_mask=key_padding_mask)
-        x = checkpoint(self.fc, x)
+        tgt_2d = tgt[:, :, 0].transpose(0, 1)
+        key_padding_mask = (tgt_2d == 0)
+
+        x = self.transformer_decoder(tgt, tgt, tgt_key_padding_mask=key_padding_mask)
+        x = self.fc(x)
         return x
     
 

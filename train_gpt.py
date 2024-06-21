@@ -1,4 +1,5 @@
 import os
+import re
 import torch
 from torch import nn
 from torch.optim import Adam
@@ -12,6 +13,7 @@ torch.manual_seed(42)
 
 
 def train_gpt(
+        data_path="dataset/ptb_train.txt",
         n_epochs=5,
         vocab_size=50000,
         d_model=512,
@@ -21,7 +23,7 @@ def train_gpt(
         lr=10-4,
         sequence_max_len=4096,
         use_subsampled_dataset=False,
-        n_samples=1000
+        n_samples=10000
     ):
     # Set the device
     # Define the device
@@ -39,8 +41,6 @@ def train_gpt(
         print("      On a Mac machine, run: pip3 install --pre torch torchvision torchaudio torchtext --index-url https://download.pytorch.org/whl/nightly/cpu")
 
     # Define the model, tokenizer, dataset, optimizer and loss function
-    data_path = "dataset/enwik9.txt"
-
     # Initialize the tokenizer and train it
     print("Training the tokenizer...")
     tokenizer = TokenizerGPT(vocab_size=vocab_size)
@@ -49,12 +49,21 @@ def train_gpt(
     # Initialize the model
     print("Initializing the model...")
 
-    # Checks if a checkpoint exists
-    checkpoint_path = "gpt_weights/checkpoint_{last_epoch}.pt"
-    for i in range(n_epochs, 0, -1):
-        if os.path.exists(checkpoint_path.format(last_epoch=i)):
-            checkpoint_path = checkpoint_path.format(last_epoch=i)
-            break
+    # Define the checkpoint directory and template
+    checkpoint_dir = "gpt_weights"
+    checkpoint_template = "checkpoint_{last_epoch}.pt"
+
+    # Get a list of all checkpoint files
+    checkpoint_files = os.listdir(checkpoint_dir)
+
+    # Extract the epoch numbers from the file names
+    epoch_numbers = [int(re.search(r'(\d+)', file).group(1)) for file in checkpoint_files if re.search(r'(\d+)', file)]
+
+    # Find the maximum epoch number
+    last_epoch = max(epoch_numbers, default=0)
+
+    # Construct the path to the last checkpoint
+    checkpoint_path = os.path.join(checkpoint_dir, checkpoint_template.format(last_epoch=last_epoch))
 
     if os.path.exists(checkpoint_path):
         print("Loading checkpoint from:", checkpoint_path)
@@ -63,6 +72,8 @@ def train_gpt(
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer = Adam(model.parameters(), lr=lr, eps=1e-9)
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        last_checkpoint_epoch = checkpoint['epoch']
+        print(f"Resuming training from epoch {last_checkpoint_epoch}.")
     else:
         model = GPT(vocab_size=vocab_size, d_model=d_model, nhead=nhead, num_layers=num_layers)
         for param in model.parameters():
@@ -100,7 +111,8 @@ def train_gpt(
 
     # Define the training loop
     print("Starting training...")
-    for epoch in range(n_epochs):  # Number of epochs
+    model.train()
+    for epoch in range(last_checkpoint_epoch + 1, last_checkpoint_epoch + n_epochs, 1):  # Number of epochs
         torch.cuda.empty_cache()
         batch_iterator = tqdm(train_loader, desc=f"Processing Epoch {epoch:02d}")
         for batch in batch_iterator:
@@ -111,6 +123,9 @@ def train_gpt(
             src = batch[:, :-1]  # All but the last token
             tgt = batch[:, 1:]  # All but the first token
 
+            # Ensure tgt does not contain NaNs
+            assert not torch.isnan(tgt).any(), "Target contains NaNs"
+
             # Forward pass
             outputs = model(src)
 
@@ -119,6 +134,7 @@ def train_gpt(
 
             # Backward pass and optimization
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
             optimizer.step()
             optimizer.zero_grad()
 
@@ -135,11 +151,16 @@ def train_gpt(
 
         # Validation step
         max_batch_idx = 5
+        model.eval()
         with torch.no_grad():
             for batch_idx, batch in enumerate(val_loader):
                 batch = batch.to(device)
                 src = batch[:, :-1]  # All but the last token
                 tgt = batch[:, 1:]  # All but the first token
+                # Check intermediate outputs in validation
+                val_outputs = model(tgt)
+                # print("val_outputs: ", val_outputs)
+                assert not torch.isnan(val_outputs).any(), "Model outputs contain NaNs during validation"
                 outputs = model(src)
                 loss = loss_fn(outputs.reshape(-1, outputs.size(-1)), tgt.reshape(-1))
                 print(f"Validation Loss: {loss.item()}")
@@ -147,9 +168,13 @@ def train_gpt(
                 # Print out some predictions
                 predictions = torch.argmax(outputs, dim=-1)
                 predicted_tokens = predictions.tolist()
-                for tokens in predicted_tokens:
-                    predicted_words = tokenizer.decode(tokens)
+                original_tokens = src.tolist()
+                for orig_tokens, pred_tokens in zip(original_tokens, predicted_tokens):
+                    original_words = tokenizer.decode(orig_tokens)
+                    predicted_words = tokenizer.decode(pred_tokens)
+                    print("Original:", original_words)
                     print("Predictions:", predicted_words)
+                    print("")
                 if batch_idx == max_batch_idx:
                     break
 
@@ -158,15 +183,17 @@ def train_gpt(
 
 
 if __name__ == "__main__":
+    print("Testing the training pipeline...")
     train_gpt(
-        n_epochs=3,
+        n_epochs=10,
         vocab_size=50000,
         d_model=512,
         nhead=8,
         num_layers=6,
         batch_size=8,
         lr=10-4,
-        sequence_max_len=256,
+        sequence_max_len=64,
         use_subsampled_dataset=True,
-        n_samples=100000
+        n_samples=10000
     )
+    print("Training pipeline test complete.")
