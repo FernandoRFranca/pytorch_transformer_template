@@ -78,6 +78,7 @@ def train_gpt(
         model = GPT(vocab_size=vocab_size, d_model=d_model, nhead=nhead, num_layers=num_layers)
         for param in model.parameters():
             param.requires_grad = True
+        last_checkpoint_epoch = 0
 
     model = model.to('cuda' if torch.cuda.is_available() else 'cpu')  # Move model to GPU if available
 
