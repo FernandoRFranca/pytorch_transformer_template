@@ -139,7 +139,7 @@ def train_gpt(
             optimizer.step()
             optimizer.zero_grad()
 
-        print(f"Epoch {epoch+1}, Loss: {loss.item()}")
+        print(f"Epoch {epoch}, Loss: {loss.item()}")
 
         # Save a checkpoint
         print("Saving a checkpoint...")
@@ -148,7 +148,7 @@ def train_gpt(
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'loss': loss,
-        }, f"gpt_weights/checkpoint_{epoch+1}.pt")
+        }, f"gpt_weights/checkpoint_{epoch}.pt")
 
         # Validation step
         max_batch_idx = 5
