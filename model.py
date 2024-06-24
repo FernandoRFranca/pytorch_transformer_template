@@ -261,7 +261,7 @@ def build_transformer(src_vocab_size: int, tgt_vocab_size: int, src_seq_len: int
 
 
 class GPT(nn.Module):
-    def __init__(self, vocab_size, d_model, nhead, num_layers):
+    def __init__(self, vocab_size, d_model, nhead, num_layers, dropout=0.1):
         super(GPT, self).__init__()
         self.d_model = d_model
         self.embedding = nn.Embedding(vocab_size, d_model)
@@ -269,6 +269,7 @@ class GPT(nn.Module):
         decoder_layer = nn.TransformerDecoderLayer(d_model, nhead)
         self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers)
         self.fc = nn.Linear(d_model, vocab_size)
+        self.dropout = nn.Dropout(dropout)
 
         # Initialize weights
         self._init_weights()
@@ -288,6 +289,7 @@ class GPT(nn.Module):
 
         x = self.transformer_decoder(tgt, tgt, tgt_key_padding_mask=key_padding_mask)
         x = self.fc(x)
+        x = self.dropout(x)
         return x
     
 

@@ -192,9 +192,9 @@ if __name__ == "__main__":
         nhead=8,
         num_layers=6,
         batch_size=8,
-        lr=10-4,
-        sequence_max_len=64,
-        use_subsampled_dataset=True,
+        lr=10-3,
+        sequence_max_len=128,
+        use_subsampled_dataset=False,
         n_samples=10000
     )
     print("Training pipeline test complete.")
