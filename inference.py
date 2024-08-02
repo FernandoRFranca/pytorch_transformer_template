@@ -23,6 +23,8 @@ def predict(model, inference_ds, tokenizer_tgt, max_len, device, print_msg, glob
         # If we can't get the console width, use 80 as default
         console_width = 80
 
+    predictions = []
+    
     with torch.no_grad():
         for batch in inference_ds:
             count += 1
@@ -48,11 +50,13 @@ def predict(model, inference_ds, tokenizer_tgt, max_len, device, print_msg, glob
             print_msg(f"{f'SOURCE: ':>12}{source_text}")
             print_msg(f"{f'TARGET: ':>12}{target_text}")
             print_msg(f"{f'PREDICTED: ':>12}{model_out_text}")
+            print_msg('-'*console_width)
+            predictions.append((source_text, target_text, model_out_text))
 
             if count == num_examples:
                 print_msg('-'*console_width)
                 break
-    
+            
     if writer:
         # Evaluate the character error rate
         # Compute the char error rate 
@@ -72,3 +76,5 @@ def predict(model, inference_ds, tokenizer_tgt, max_len, device, print_msg, glob
         bleu = metric(predicted, expected)
         writer.add_scalar('validation BLEU', bleu, global_step)
         writer.flush()
+        
+    return predictions

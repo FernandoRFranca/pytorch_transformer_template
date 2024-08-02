@@ -191,7 +191,7 @@ if __name__ == "__main__":
         d_model=512,
         nhead=8,
         num_layers=6,
-        batch_size=8,
+        batch_size=32,
         lr=10-3,
         sequence_max_len=128,
         use_subsampled_dataset=False,

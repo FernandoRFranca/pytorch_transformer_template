@@ -352,7 +352,7 @@ class TokenizerGPT:
     def train(self, files_list):
         model = BPE()
 
-        trainer = BpeTrainer(special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"])
+        trainer = BpeTrainer(special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]", "< unk >"])
         
         pre_tokenizer = Whitespace()
 
