@@ -4,18 +4,19 @@ import torch
 from torch import nn
 from torch.optim import Adam
 from torch.utils.data.dataset import random_split
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from model import GPT, TokenizerGPT, TextDataset, DataLoaderGPT
+from model import GPT, TokenizerGPT, TextDataset
 
 # Set the random seed for reproducibility
 torch.manual_seed(42)
 
 
 def train_gpt(
-        data_path="dataset/ptb_train.txt",
+        data_path="dataset/dummy.txt",
         n_epochs=5,
-        vocab_size=50000,
+        vocab_size=None,
         d_model=512,
         nhead=8,
         num_layers=6,
@@ -45,6 +46,7 @@ def train_gpt(
     print("Training the tokenizer...")
     tokenizer = TokenizerGPT(vocab_size=vocab_size)
     tokenizer.train([data_path])
+    vocab_size = tokenizer.get_vocab_size()
 
     # Initialize the model
     print("Initializing the model...")
@@ -99,8 +101,8 @@ def train_gpt(
     val_size = len(dataset) - train_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
-    train_loader = DataLoaderGPT(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoaderGPT(val_dataset, batch_size=1, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
 
     # Initialize the optimizer
     print("Initializing the optimizer...")
@@ -112,9 +114,9 @@ def train_gpt(
 
     # Define the training loop
     print("Starting training...")
-    model.train()
     for epoch in range(last_checkpoint_epoch + 1, last_checkpoint_epoch + n_epochs, 1):  # Number of epochs
         torch.cuda.empty_cache()
+        model.train()
         batch_iterator = tqdm(train_loader, desc=f"Processing Epoch {epoch:02d}")
         for batch in batch_iterator:
             # Move data to the same device as the model
@@ -142,13 +144,13 @@ def train_gpt(
         print(f"Epoch {epoch}, Loss: {loss.item()}")
 
         # Save a checkpoint
-        print("Saving a checkpoint...")
-        torch.save({
-            'epoch': epoch,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'loss': loss,
-        }, f"gpt_weights/checkpoint_{epoch}.pt")
+        # print("Saving a checkpoint...")
+        # torch.save({
+        #     'epoch': epoch,
+        #     'model_state_dict': model.state_dict(),
+        #     'optimizer_state_dict': optimizer.state_dict(),
+        #     'loss': loss,
+        # }, f"gpt_weights/checkpoint_{epoch}.pt")
 
         # Validation step
         max_batch_idx = 5
@@ -158,10 +160,11 @@ def train_gpt(
                 batch = batch.to(device)
                 src = batch[:, :-1]  # All but the last token
                 tgt = batch[:, 1:]  # All but the first token
+
                 # Check intermediate outputs in validation
                 val_outputs = model(tgt)
-                # print("val_outputs: ", val_outputs)
                 assert not torch.isnan(val_outputs).any(), "Model outputs contain NaNs during validation"
+                
                 outputs = model(src)
                 loss = loss_fn(outputs.reshape(-1, outputs.size(-1)), tgt.reshape(-1))
                 print(f"Validation Loss: {loss.item()}")
@@ -170,12 +173,40 @@ def train_gpt(
                 predictions = torch.argmax(outputs, dim=-1)
                 predicted_tokens = predictions.tolist()
                 original_tokens = src.tolist()
+                
                 for orig_tokens, pred_tokens in zip(original_tokens, predicted_tokens):
+                    # Filter out invalid tokens
+                    valid_pred_tokens = [token for token in pred_tokens if token < vocab_size]
+                    print(f"Valid tokens quantity: {len(valid_pred_tokens)}")
+                    invalid_tokens = [token for token in pred_tokens if token >= vocab_size]
+                    
+                    if invalid_tokens:
+                        print(f"Warning: Invalid tokens found in predictions: {invalid_tokens}")
+
                     original_words = tokenizer.decode(orig_tokens)
                     predicted_words = tokenizer.decode(pred_tokens)
                     print("Original:", original_words)
                     print("Predictions:", predicted_words)
                     print("")
+
+                    # Print token IDs for debugging
+                    print("Original Tokens:", orig_tokens)
+                    print("Predicted Tokens:", pred_tokens)
+                    print("")
+
+                    # Check if the predicted tokens are in the vocabulary
+                    vocab = tokenizer.get_vocab() if hasattr(tokenizer, 'get_vocab') else None
+                    if vocab:
+                        for token in pred_tokens:
+                            if token not in vocab:
+                                print(f"Warning: Token {token} not in vocabulary")
+
+                    # Additional debugging information
+                    print(f"Number of unique predicted tokens: {len(set(pred_tokens))}")
+                    print(f"Number of zero tokens in predictions: {pred_tokens.count(0)}")
+                    print(f"Total number of predicted tokens: {len(pred_tokens)}")
+                    print("")
+
                 if batch_idx == max_batch_idx:
                     break
 
@@ -186,12 +217,12 @@ def train_gpt(
 if __name__ == "__main__":
     print("Testing the training pipeline...")
     train_gpt(
-        n_epochs=10,
-        vocab_size=50000,
+        n_epochs=1000,
+        vocab_size=None, # Automatically set the vocab size
         d_model=512,
         nhead=8,
         num_layers=6,
-        batch_size=32,
+        batch_size=128,
         lr=10-3,
         sequence_max_len=128,
         use_subsampled_dataset=False,

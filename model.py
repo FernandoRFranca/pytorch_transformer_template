@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
-from torch.nn import functional as F
-from tokenizers import Tokenizer
-from tokenizers.models import BPE
-from tokenizers.trainers import BpeTrainer
-from tokenizers.pre_tokenizers import Whitespace
+# from torch.nn import functional as F
+from tokenizers import Tokenizer, models, pre_tokenizers, trainers
+# from tokenizers.models import BPE
+# from tokenizers.trainers import BpeTrainer
+# from tokenizers.pre_tokenizers import Whitespace
 from torch.utils.data import Dataset, DataLoader
-from torch.utils.checkpoint import checkpoint
+# from torch.utils.checkpoint import checkpoint
 
 import math
 
@@ -316,33 +316,21 @@ class TextDataset(Dataset):
         self.filepath = filepath
         self.tokenizer = tokenizer
         self.max_len = max_len
-        self.offsets = []
+        self.lines = []
 
         with open(filepath, 'r', encoding='utf-8') as file:
-            offset = 0
             for line in file:
-                self.offsets.append(offset)
-                offset += len(line.encode('utf-8'))  # Get the length of line in bytes
+                self.lines.append(line.strip())
 
     def __len__(self):
-        with open(self.filepath, 'r', encoding='utf-8') as file:
-            lines = sum(1 for _ in file)
-        return lines
+        return len(self.lines)
 
     def __getitem__(self, idx):
-        with open(self.filepath, 'r', encoding='utf-8') as file:
-            file.seek(self.offsets[idx])  # Jump to the start of the line
-            line = file.readline()
-            tokens = self.tokenizer.encode(line.strip())
-            tokens = tokens[:self.max_len]  # Truncate to max_len
-            padded_tokens = tokens + [0]*(self.max_len - len(tokens))
-            return torch.tensor(padded_tokens, dtype=torch.long)
-        
-
-class DataLoaderGPT(DataLoader):
-    def __init__(self, dataset, batch_size, shuffle=True):
-        super().__init__(dataset, batch_size=batch_size)
-        self.data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+        line = self.lines[idx]
+        tokens = self.tokenizer.encode(line).ids  # Assuming the tokenizer returns an object with ids attribute
+        tokens = tokens[:self.max_len]  # Truncate to max_len
+        padded_tokens = tokens + [0] * (self.max_len - len(tokens))
+        return torch.tensor(padded_tokens, dtype=torch.long)
 
 
 class TokenizerGPT:
@@ -350,11 +338,16 @@ class TokenizerGPT:
         self.vocab_size = vocab_size
 
     def train(self, files_list):
-        model = BPE()
-
-        trainer = BpeTrainer(special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]", "< unk >"])
+        if self.vocab_size is None:
+            self.vocab_size = self.calculate_vocab_size(files_list)
+            print(f"Calculated vocab_size: {self.vocab_size}")
         
-        pre_tokenizer = Whitespace()
+        model = models.BPE()
+
+        assert self.vocab_size is not None, "vocab_size must be set before training the tokenizer"
+        trainer = trainers.BpeTrainer(vocab_size=self.vocab_size, special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"])
+        
+        pre_tokenizer = pre_tokenizers.Whitespace()
 
         tokenizer = Tokenizer(model)
         tokenizer.pre_tokenizer = pre_tokenizer
@@ -363,8 +356,28 @@ class TokenizerGPT:
 
         self.tokenizer = tokenizer
 
+    def calculate_vocab_size(self, files_list):
+        # This function calculates the vocab size based on the dataset
+        token_counts = {}
+        for file_path in files_list:
+            with open(file_path, 'r', encoding='utf-8') as file:
+                for line in file:
+                    tokens = line.strip().split()
+                    for token in tokens:
+                        if token in token_counts:
+                            token_counts[token] += 1
+                        else:
+                            token_counts[token] = 1
+        return len(token_counts)
+
     def encode(self, text):
-        return self.tokenizer.encode(text).ids
+        return self.tokenizer.encode(text)
 
     def decode(self, tokens):
         return self.tokenizer.decode(tokens)
+    
+    def get_vocab(self):
+        return self.tokenizer.get_vocab()
+
+    def get_vocab_size(self):
+        return self.vocab_size
