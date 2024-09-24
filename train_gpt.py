@@ -7,16 +7,16 @@ from torch.utils.data.dataset import random_split
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from model import GPT, TokenizerGPT, TextDataset
+from model import GPT, BPETokenizer, TextDataset
 
 # Set the random seed for reproducibility
 torch.manual_seed(42)
 
 
 def train_gpt(
-        data_path="dataset/dummy.txt",
+        data_path="dataset/ptb_train.txt",
         n_epochs=5,
-        vocab_size=None,
+        vocab_size=50_000,
         d_model=512,
         nhead=8,
         num_layers=6,
@@ -29,6 +29,8 @@ def train_gpt(
     # Set the device
     # Define the device
     device = "cuda" if torch.cuda.is_available() else "mps" if torch.has_mps or torch.backends.mps.is_available() else "cpu"
+    if device != 'cuda':
+        raise Exception("This script requires a CUDA-capable GPU for training. Please check the README for more information.")
     print("Using device:", device)
     if (device == 'cuda'):
         print(f"Device name: {torch.cuda.get_device_name(device.index)}")
@@ -44,9 +46,9 @@ def train_gpt(
     # Define the model, tokenizer, dataset, optimizer and loss function
     # Initialize the tokenizer and train it
     print("Training the tokenizer...")
-    tokenizer = TokenizerGPT(vocab_size=vocab_size)
+    tokenizer = BPETokenizer(vocab_size=vocab_size)
     tokenizer.train([data_path])
-    vocab_size = tokenizer.get_vocab_size()
+    # vocab_size = tokenizer.get_vocab_size()
 
     # Initialize the model
     print("Initializing the model...")
@@ -97,7 +99,7 @@ def train_gpt(
 
     # Split the dataset into training and validation sets
     print("Splitting the dataset into training and validation sets...")
-    train_size = int(0.8 * len(dataset))  # 80% for training
+    train_size = int(0.80 * len(dataset))  # 80% for training
     val_size = len(dataset) - train_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
@@ -110,7 +112,7 @@ def train_gpt(
 
     # Initialize the loss function
     print("Initializing the loss function...")
-    loss_fn = nn.CrossEntropyLoss()
+    loss_fn = nn.CrossEntropyLoss(ignore_index=0)
 
     # Define the training loop
     print("Starting training...")
@@ -144,16 +146,16 @@ def train_gpt(
         print(f"Epoch {epoch}, Loss: {loss.item()}")
 
         # Save a checkpoint
-        # print("Saving a checkpoint...")
-        # torch.save({
-        #     'epoch': epoch,
-        #     'model_state_dict': model.state_dict(),
-        #     'optimizer_state_dict': optimizer.state_dict(),
-        #     'loss': loss,
-        # }, f"gpt_weights/checkpoint_{epoch}.pt")
+        print("Saving a checkpoint...")
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'loss': loss,
+        }, f"gpt_weights/checkpoint_{epoch}.pt")
 
         # Validation step
-        max_batch_idx = 5
+        max_batch_idx = 0
         model.eval()
         with torch.no_grad():
             for batch_idx, batch in enumerate(val_loader):
@@ -196,6 +198,7 @@ def train_gpt(
 
                     # Check if the predicted tokens are in the vocabulary
                     vocab = tokenizer.get_vocab() if hasattr(tokenizer, 'get_vocab') else None
+                    # print(f"Vocab: {vocab}")
                     if vocab:
                         for token in pred_tokens:
                             if token not in vocab:
@@ -217,13 +220,13 @@ def train_gpt(
 if __name__ == "__main__":
     print("Testing the training pipeline...")
     train_gpt(
-        n_epochs=1000,
-        vocab_size=None, # Automatically set the vocab size
+        n_epochs=20,
+        vocab_size=50_000,
         d_model=512,
         nhead=8,
         num_layers=6,
-        batch_size=128,
-        lr=10-3,
+        batch_size=8,
+        lr=10-4,
         sequence_max_len=128,
         use_subsampled_dataset=False,
         n_samples=10000

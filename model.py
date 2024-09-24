@@ -1,11 +1,15 @@
 import torch
 import torch.nn as nn
 # from torch.nn import functional as F
-from tokenizers import Tokenizer, models, pre_tokenizers, trainers
+from tokenizers import models, trainers, pre_tokenizers
+from tokenizers import Tokenizer
+from tokenizers.models import WordLevel
+from tokenizers.trainers import WordLevelTrainer
+from tokenizers.pre_tokenizers import Whitespace
 # from tokenizers.models import BPE
 # from tokenizers.trainers import BpeTrainer
 # from tokenizers.pre_tokenizers import Whitespace
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset # , DataLoader
 # from torch.utils.checkpoint import checkpoint
 
 import math
@@ -280,27 +284,44 @@ class GPT(nn.Module):
         self.fc.bias.data.zero_()
         self.fc.weight.data.uniform_(-initrange, initrange)
 
-    def forward(self, tgt):
-        tgt = self.embedding(tgt) * math.sqrt(self.d_model)
-        tgt = self.pos_encoder(tgt)
+    def forward(self, x):
+        x = self.embedding(x)
+        x = self.pos_encoder(x)
 
-        tgt_2d = tgt[:, :, 0].transpose(0, 1)
+        tgt_mask = nn.Transformer.generate_square_subsequent_mask(x.size(0)).to(x.device)
+        tgt_2d = x[:, :, 0].transpose(0, 1)
         key_padding_mask = (tgt_2d == 0)
 
-        x = self.transformer_decoder(tgt, tgt, tgt_key_padding_mask=key_padding_mask)
+        x = self.transformer_decoder(x, x, tgt_mask=tgt_mask, tgt_key_padding_mask=key_padding_mask)
         x = self.fc(x)
         x = self.dropout(x)
         return x
     
+    def predict(self, text, tokenizer, max_length=128):
+        self.eval()
+        tokens = tokenizer.encode(text).ids
+        input_tensor = torch.tensor(tokens).unsqueeze(0).to(next(self.parameters()).device)  # Add batch dimension and move to device
+
+        with torch.no_grad():
+            for _ in range(max_length):
+                outputs = self(input_tensor)
+                next_token_logits = outputs[:, -1, :]
+                next_token = torch.argmax(next_token_logits, dim=-1).item()
+                input_tensor = torch.cat([input_tensor, torch.tensor([[next_token]]).to(next(self.parameters()).device)], dim=1)
+                if next_token == tokenizer.tokenizer.token_to_id('[SEP]'):  # Replace with the stop token
+                    break
+
+        predicted_tokens = input_tensor.squeeze().tolist()
+        predicted_text = tokenizer.decode(predicted_tokens)  # Ensure special tokens are skipped
+        return predicted_text
+    
 
 class PositionalEncodingGPT(nn.Module):
-    def __init__(self, d_model, dropout=0.1, max_len=5000):
+    def __init__(self, d_model, max_len=5000):
         super(PositionalEncodingGPT, self).__init__()
-        self.dropout = nn.Dropout(p=dropout)
-
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-torch.log(torch.tensor(10000.0)) / d_model))
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0).transpose(0, 1)
@@ -308,7 +329,7 @@ class PositionalEncodingGPT(nn.Module):
 
     def forward(self, x):
         x = x + self.pe[:x.size(0), :]
-        return self.dropout(x)
+        return x
     
 
 class TextDataset(Dataset):
@@ -333,48 +354,35 @@ class TextDataset(Dataset):
         return torch.tensor(padded_tokens, dtype=torch.long)
 
 
-class TokenizerGPT:
+class BPETokenizer:
     def __init__(self, vocab_size):
         self.vocab_size = vocab_size
+        self.tokenizer = None
 
     def train(self, files_list):
-        if self.vocab_size is None:
-            self.vocab_size = self.calculate_vocab_size(files_list)
-            print(f"Calculated vocab_size: {self.vocab_size}")
-        
-        model = models.BPE()
-
         assert self.vocab_size is not None, "vocab_size must be set before training the tokenizer"
-        trainer = trainers.BpeTrainer(vocab_size=self.vocab_size, special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"])
         
-        pre_tokenizer = pre_tokenizers.Whitespace()
-
-        tokenizer = Tokenizer(model)
-        tokenizer.pre_tokenizer = pre_tokenizer
-
+        tokenizer = Tokenizer(WordLevel(unk_token="<unk>"))
+        tokenizer.pre_tokenizer = Whitespace()
+        trainer = WordLevelTrainer(special_tokens=["[UNK]", "[PAD]", "[SOS]", "[EOS]", "<unk>"], min_frequency=1)
+        
+        # Treina o tokenizador nos arquivos fornecidos
         tokenizer.train(files_list, trainer)
-
+        
         self.tokenizer = tokenizer
-
-    def calculate_vocab_size(self, files_list):
-        # This function calculates the vocab size based on the dataset
-        token_counts = {}
-        for file_path in files_list:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                for line in file:
-                    tokens = line.strip().split()
-                    for token in tokens:
-                        if token in token_counts:
-                            token_counts[token] += 1
-                        else:
-                            token_counts[token] = 1
-        return len(token_counts)
+        print("Tokenizer trained successfully!")
 
     def encode(self, text):
+        if self.tokenizer is None:
+            raise ValueError("Tokenizer has not been trained yet.")
         return self.tokenizer.encode(text)
 
     def decode(self, tokens):
-        return self.tokenizer.decode(tokens)
+        if self.tokenizer is None:
+            raise ValueError("Tokenizer has not been trained yet.")
+        decoded_text = self.tokenizer.decode(tokens, skip_special_tokens=True)
+        print(f"Decoded text: {decoded_text}")
+        return decoded_text
     
     def get_vocab(self):
         return self.tokenizer.get_vocab()
