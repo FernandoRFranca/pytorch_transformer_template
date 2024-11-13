@@ -308,11 +308,11 @@ class GPT(nn.Module):
                 next_token_logits = outputs[:, -1, :]
                 next_token = torch.argmax(next_token_logits, dim=-1).item()
                 input_tensor = torch.cat([input_tensor, torch.tensor([[next_token]]).to(next(self.parameters()).device)], dim=1)
-                if next_token == tokenizer.tokenizer.token_to_id('[SEP]'):  # Replace with the stop token
+                if next_token == tokenizer.token_to_id('[SEP]'):  # Replace with the stop token
                     break
 
         predicted_tokens = input_tensor.squeeze().tolist()
-        predicted_text = tokenizer.decode(predicted_tokens)  # Ensure special tokens are skipped
+        predicted_text = tokenizer.decode(predicted_tokens, skip_special_tokens=True)  # Ensure special tokens are skipped
         return predicted_text
     
 
