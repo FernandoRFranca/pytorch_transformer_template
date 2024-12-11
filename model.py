@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 # from torch.nn import functional as F
 from tokenizers import Tokenizer, models, pre_tokenizers, trainers
 # from tokenizers.models import BPE
@@ -261,37 +262,29 @@ def build_transformer(src_vocab_size: int, tgt_vocab_size: int, src_seq_len: int
 
 
 class GPT(nn.Module):
-    def __init__(self, vocab_size, d_model, nhead, num_layers, dropout=0.1):
-        super(GPT, self).__init__()
-        self.d_model = d_model
-        self.embedding = nn.Embedding(vocab_size, d_model)
-        self.pos_encoder = PositionalEncodingGPT(d_model)
-        decoder_layer = nn.TransformerDecoderLayer(d_model, nhead)
-        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers)
-        self.fc = nn.Linear(d_model, vocab_size)
-        self.dropout = nn.Dropout(dropout)
-
-        # Initialize weights
-        self._init_weights()
-
-    def _init_weights(self):
-        initrange = 0.1
-        self.embedding.weight.data.uniform_(-initrange, initrange)
-        self.fc.bias.data.zero_()
-        self.fc.weight.data.uniform_(-initrange, initrange)
-
-    def forward(self, tgt):
-        tgt = self.embedding(tgt) * math.sqrt(self.d_model)
-        tgt = self.pos_encoder(tgt)
-
-        tgt_2d = tgt[:, :, 0].transpose(0, 1)
-        key_padding_mask = (tgt_2d == 0)
-
-        x = self.transformer_decoder(tgt, tgt, tgt_key_padding_mask=key_padding_mask)
-        x = self.fc(x)
-        x = self.dropout(x)
-        return x
+    def __init__(self, vocab_size, d_model):
+        super().__init__()
+        self.wte = nn.Embedding(vocab_size, d_model) # word token embeddings
     
+    def forward(self, inputs, targets = None):
+        logits = self.wte(inputs) # dim -> batch_size, sequence_length, d_model
+        loss = None
+        if targets != None:
+            batch_size, sequence_length, d_model = logits.shape
+            logits = logits.view(batch_size * sequence_length, d_model)
+            targets = targets.view(batch_size * sequence_length)
+            loss = F.cross_entropy(logits, targets)
+        return logits, loss
+    
+    def generate(self, inputs, max_new_tokens):
+        for _ in range(max_new_tokens):
+            logits, _ = self(inputs)  
+            logits = logits[:, -1, :] 
+            probs = F.softmax(logits, dim=1)            
+            idx_next = torch.multinomial(probs, num_samples=1) 
+            inputs = torch.cat([inputs, idx_next], dim=1)
+        return inputs
+
 
 class PositionalEncodingGPT(nn.Module):
     def __init__(self, d_model, dropout=0.1, max_len=5000):
