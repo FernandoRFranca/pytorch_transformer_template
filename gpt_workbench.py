@@ -1,10 +1,14 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import Dataset
 from tqdm import tqdm
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+# GPT SECTION
 
 
 class FernandoGPT(nn.Module):
@@ -61,6 +65,9 @@ class BenchmarkGPT(nn.Module):
         return inputs
     
 
+# TOKENIZER SECTION
+
+
 class FernandoTokenizer():
     def __init__(self, vocab_dir='text.txt') -> None:
         self.vocab_dir = vocab_dir
@@ -113,6 +120,96 @@ class BenchmarkTokenizer():
 
     def decode(self, input_tokens: list[int]) -> str:
         return "".join([self.idx_to_chr[i] for i in input_tokens])
+    
+
+# DATASET SECTION
+
+
+class GPTDataset(Dataset):
+    def __init__(self, tokens):
+        self.tokens = tokens
+
+    def __getitem__(self, idx):
+        return self.tokens[idx]
+    
+    def __len__(self):
+        return self.tokens.shape[0]
+
+    def get_batch(self, start, end):
+        return self.tokens[start:end]
+    
+
+# DATALOADER SECTION
+
+
+class DataLoaderFernando:
+    def __init__(self, tokens, batch_size, context_length):
+        self.tokens = tokens
+        self.batch_size = batch_size
+        self.context_length = context_length
+
+        self.current_position = 0
+
+    def get_batch(self):
+        # Definir localmente batch_size e context_length
+        b, c = self.batch_size, self.context_length
+
+        # Definir posição inicial e final
+        start_pos = self.current_position
+        end_pos = self.current_position + b * c + 1
+
+        # Calcular tamanho da janela de tokens iniciais para caso os batchs estejam pegando o final da matriz de tokens
+        add_data = -1
+        if end_pos > len(self.tokens):
+            add_data = end_pos - len(self.tokens) - 1
+            end_pos = len(self.tokens) - 1
+
+        # Janelar a matriz de tokens
+        d = self.tokens[start_pos:end_pos]
+
+        # Se passar do ultimo token, concatenar tokens iniciais
+        if add_data != -1:
+            d = torch.cat([d, self.tokens[:add_data]])
+
+        # Capturar x e y, usando reshape para evitar
+        x = d[:-1].view(b, c)
+        y = d[1:].view(b, c)
+        self.current_position += b * c
+        return x, y
+
+
+class DataLoaderBenchmark:
+    def __init__(self, tokens, batch_size, context_length) -> None:
+        self.tokens = tokens
+        self.batch_size = batch_size
+        self.context_length = context_length
+
+        self.current_position = 0
+
+    def get_batch(self) -> torch.tensor:
+        b, c = self.batch_size, self.context_length
+
+        start_pos = self.current_position
+        end_pos = self.current_position + b * c + 1
+
+        # if the batch exceeds total length, get the data till last token
+        # and take remaining from starting token to avoid always excluding some data
+        add_data = -1 # n, if length exceeds and we need `n` additional tokens from start
+        if end_pos > len(self.tokens):
+            add_data = end_pos - len(self.tokens) - 1
+            end_pos = len(self.tokens) - 1
+
+        d = self.tokens[start_pos:end_pos]
+        if add_data != -1:
+            d = torch.cat([d, self.tokens[:add_data]])
+        x = (d[:-1]).view(b, c)  # inputs
+        y = (d[1:]).view(b, c)  # targets
+
+        self.current_position += b * c # set the next position
+        return x, y
+
+
+# TRAINING SECTION
 
 
 def initialize_model(vocab_size = 100, d_model=512):
@@ -120,8 +217,34 @@ def initialize_model(vocab_size = 100, d_model=512):
     return model
 
 
-def train_model():
-    pass
+def train_model(m, train_loader, eval_loader):
+    lr = 1e-3
+    optim = torch.optim.AdamW(m.parameters(), lr=lr)
+
+    epochs = 5000
+    eval_steps = 1000 # perform evaluation in every n steps
+    for ep in range(epochs):
+        xb, yb = train_loader.get_batch()
+
+        logits, loss = m(xb, yb)
+        print(f"Training loss: {loss} - Sample of logits: {logits[:1]}")
+        optim.zero_grad(set_to_none=True)
+        loss.backward()
+        optim.step()
+
+        if ep % eval_steps == 0 or ep == epochs-1:
+            m.eval()
+            with torch.no_grad():
+                xvb, yvb = eval_loader.get_batch()
+                _, e_loss = m(xvb, yvb)
+
+                print(f"Epoch: {ep}\tlr: {lr}\ttrain_loss: {loss}\teval_loss: {e_loss}")
+            m.train() # back to training mode
+    
+    return "Success."
+
+
+# TEST SECTION
 
 
 def test_model_instanciation():
@@ -141,6 +264,35 @@ def test_model_instanciation():
     print("Test complete.")
 
 
+def test_model_training():
+    train_batch_size = 16  # training batch size
+    eval_batch_size = 8  # evaluation batch size
+    context_length = 256  # number of tokens processed in a single batch
+    train_split = 0.8  # percentage of data to use from total data for training
+
+    data_dir = "dataset/data.txt"
+    tokenizer = FernandoTokenizer(data_dir)
+    text = tokenizer.text
+    print(f"Text sample: {text[:10] if len(text) > 10 else text}")
+
+    data = torch.tensor(tokenizer.encode(text), dtype=torch.long, device=device)
+
+    # split data into trian and eval
+    n_data = len(data)
+    train_data = data[:int(n_data * train_split)]
+    eval_data = data[int(n_data * train_split):]
+
+    train_loader = DataLoaderFernando(train_data, train_batch_size, context_length)
+    eval_loader = DataLoaderFernando(eval_data, eval_batch_size, context_length)
+
+    chars = list(set(text))
+    vocab_size = len(chars)
+    d_model = vocab_size 
+
+    m = FernandoGPT(vocab_size=vocab_size, d_model=d_model).to(device)
+    assert train_model(m, train_loader, eval_loader) == "Success."
+
+
 def test_tokenizer_instanciation():
     tokenizer = FernandoTokenizer(vocab_dir='dataset/data.txt')
     print("Teste encodificação de token 'H': ", tokenizer.encode('H'))
@@ -156,4 +308,5 @@ def test_tokenizer_instanciation():
 
 if __name__ == '__main__':
     # test_model_instanciation()
-    test_tokenizer_instanciation()
+    # test_tokenizer_instanciation()
+    test_model_training()
