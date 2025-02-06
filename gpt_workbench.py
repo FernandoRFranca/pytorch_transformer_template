@@ -105,7 +105,7 @@ class FernandoTokenizer():
 class BenchmarkTokenizer():
     def __init__(self, data_dir='data.txt'):
         self.data_dir = "data.txt"
-        self.text = open(data_dir, 'r').read() # load all the data as simple string
+        self.text = open(data_dir, 'r', encoding='utf-8').read() # load all the data as simple string
 
         # Get all unique characters in the text as vocabulary
         self.chars = list(set(self.text))
@@ -142,7 +142,7 @@ class GPTDataset(Dataset):
 # DATALOADER SECTION
 
 
-class DataLoaderFernando:
+class FernandoDataLoader:
     def __init__(self, tokens, batch_size, context_length):
         self.tokens = tokens
         self.batch_size = batch_size
@@ -161,8 +161,8 @@ class DataLoaderFernando:
         # Calcular tamanho da janela de tokens iniciais para caso os batchs estejam pegando o final da matriz de tokens
         add_data = -1
         if end_pos > len(self.tokens):
-            add_data = end_pos - len(self.tokens) - 1
-            end_pos = len(self.tokens) - 1
+            add_data = end_pos - len(self.tokens)
+            end_pos = len(self.tokens)
 
         # Janelar a matriz de tokens
         d = self.tokens[start_pos:end_pos]
@@ -172,13 +172,16 @@ class DataLoaderFernando:
             d = torch.cat([d, self.tokens[:add_data]])
 
         # Capturar x e y, usando reshape para evitar
-        x = d[:-1].view(b, c)
-        y = d[1:].view(b, c)
-        self.current_position += b * c
+        x = (d[:-1]).view(b, c)
+        y = (d[1:]).view(b, c)
+        if add_data != -1:
+            self.current_position += b * c
+        else:
+            self.current_position = 0
         return x, y
 
 
-class DataLoaderBenchmark:
+class BenchmarkDataLoader:
     def __init__(self, tokens, batch_size, context_length) -> None:
         self.tokens = tokens
         self.batch_size = batch_size
@@ -217,7 +220,13 @@ def initialize_model(vocab_size = 100, d_model=512):
     return model
 
 
-def train_model(m, train_loader, eval_loader):
+def train_model(
+    m,
+    train_loader,
+    eval_loader,
+    suppress_logits_print=True,
+    suppress_intra_epoch_print=True
+):
     lr = 1e-3
     optim = torch.optim.AdamW(m.parameters(), lr=lr)
 
@@ -227,7 +236,10 @@ def train_model(m, train_loader, eval_loader):
         xb, yb = train_loader.get_batch()
 
         logits, loss = m(xb, yb)
-        print(f"Training loss: {loss} - Sample of logits: {logits[:1]}")
+        if not suppress_logits_print:
+            print(f"Training loss: {loss} - Sample of logits: {logits[:1]}")
+        elif not suppress_intra_epoch_print:
+            print(f"Training loss: {loss}")
         optim.zero_grad(set_to_none=True)
         loss.backward()
         optim.step()
@@ -282,8 +294,8 @@ def test_model_training():
     train_data = data[:int(n_data * train_split)]
     eval_data = data[int(n_data * train_split):]
 
-    train_loader = DataLoaderFernando(train_data, train_batch_size, context_length)
-    eval_loader = DataLoaderFernando(eval_data, eval_batch_size, context_length)
+    train_loader = FernandoDataLoader(train_data, train_batch_size, context_length)
+    eval_loader = FernandoDataLoader(eval_data, eval_batch_size, context_length)
 
     chars = list(set(text))
     vocab_size = len(chars)
@@ -291,6 +303,11 @@ def test_model_training():
 
     m = FernandoGPT(vocab_size=vocab_size, d_model=d_model).to(device)
     assert train_model(m, train_loader, eval_loader) == "Success."
+
+    with torch.no_grad():
+        input = torch.tensor(tokenizer.encode("Love"), dtype=torch.long, device=device).unsqueeze(0)
+        prediction = tokenizer.decode(m.generate(input, max_len=500))
+        print(prediction)
 
 
 def test_tokenizer_instanciation():
@@ -302,7 +319,7 @@ def test_tokenizer_instanciation():
     model.to(device=device)
     with torch.no_grad():
         input = torch.tensor(tokenizer.encode("Love"), dtype=torch.long, device=device).unsqueeze(0)
-        prediction = tokenizer.decode(model.generate(input, max_len=10000))
+        prediction = tokenizer.decode(model.generate(input, max_len=500))
         print(prediction)
 
 
