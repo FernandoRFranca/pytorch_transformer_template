@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,58 +13,114 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class FernandoGPT(nn.Module):
-    def __init__(self, d_model, vocab_size):
+    def __init__(self, d_model, vocab_size, context_length=512):
         super().__init__()
         self.d_model = d_model
         self.vocab_size = vocab_size
+        self.context_length = context_length
         self.wte = nn.Embedding(self.vocab_size, self.d_model)
+        self.pe = PositionalEncoding(context_length, self.d_model)
+        self.fcn = nn.Sequential(
+            nn.Linear(d_model, 4 * d_model),
+            nn.GELU(),
+            nn.Linear(4 * d_model, d_model)
+        )
 
     def forward(self, inputs, targets=None):
         self.batch_size = inputs.shape[0]
         self.sequence_length = inputs.shape[1]
         logits = self.wte(inputs) # dim -> (batch_size, sequence_length, d_model)
+        # logits = self.pe(logits)
+        # logits = self.fcn(logits)
         loss = None
         if targets is not None:
             logits = logits.view(self.batch_size * self.sequence_length, self.d_model)
             y = targets.view(self.batch_size * self.sequence_length)
             loss = F.cross_entropy(logits, y)
         return logits, loss
+    
+    def _truncate_input(self, inputs):
+        current_sequence_length = inputs.size(1)
+        if current_sequence_length > self.context_length:
+            inputs = inputs[:, -self.context_length:]
+        return inputs
 
     def generate(self, inputs, max_len):
+        output = inputs.clone()
         for _ in range(max_len):
+            inputs = self._truncate_input(inputs)
             logits, _ = self.forward(inputs)
-            logits = logits[:, -1, :] # Get the last token
+            logits = logits[:, -1, :]
             logits = nn.Softmax(dim=-1)(logits)
             prediction_token_idx = torch.multinomial(logits, num_samples=1)
-            inputs = torch.cat([inputs, prediction_token_idx], dim=1)
-        return inputs
+            output = torch.cat([output, prediction_token_idx], dim=1)
+        return output
         
 
 class BenchmarkGPT(nn.Module):
-    def __init__(self, vocab_size, d_model):
+    def __init__(self, vocab_size, d_model, context_length=512):
         super().__init__()
+        self.context_length = context_length
         self.wte = nn.Embedding(vocab_size, d_model) # word token embeddings
+        self.wpe = PositionalEncoding(context_length, d_model) # initialize positional encodings
+        self.fcn = nn.Sequential(
+            nn.Linear(d_model, 4 * d_model),
+            nn.GELU(),
+            nn.Linear(4 * d_model, d_model)
+        )
     
     def forward(self, inputs, targets = None):
         logits = self.wte(inputs) # dim -> batch_size, sequence_length, d_model
+        logits = self.wpe(logits)
+        logits = self.fcn(logits)
         loss = None
         if targets != None:
-            print(f"Decoder logits shape: {logits.shape}")
+            # print(f"Decoder logits shape: {logits.shape}")
             batch_size, sequence_length, d_model = logits.shape
             logits = logits.view(batch_size * sequence_length, d_model)
             targets = targets.view(batch_size * sequence_length)
             loss = F.cross_entropy(logits, targets)
         return logits, loss
     
-    def generate(self, inputs, max_new_tokens):
-        for _ in range(max_new_tokens):
+    def generate(self, inputs, max_len):
+        output = inputs.clone()
+        for _ in range(max_len):
+            current_seq_length = inputs.size(1)
+            # Truncate inputs if it exceeds context_length
+            if current_seq_length > self.context_length:
+                inputs = inputs[:, -self.context_length:]
+            # we only pass targets on training to calculate loss
             logits, _ = self(inputs)  
+            # for all the batches, get the embeds for last predicted sequence
             logits = logits[:, -1, :] 
             probs = F.softmax(logits, dim=1)            
+            # get the probable token based on the input probs
             idx_next = torch.multinomial(probs, num_samples=1) 
+            
             inputs = torch.cat([inputs, idx_next], dim=1)
-        return inputs
+            output = torch.cat([output, idx_next], dim=1)
+        return output
     
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, context_length, d_model) -> None:
+        super().__init__()
+        pe = torch.zeros(context_length, d_model)
+        
+        position = torch.arange(0, context_length, dtype=torch.float).unsqueeze(1)
+        
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        
+        pe = pe.unsqueeze(0)
+        
+        self.register_buffer('pe', pe)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x + self.pe[:,:x.size(1), :] 
+
 
 # TOKENIZER SECTION
 
@@ -102,24 +159,29 @@ class FernandoTokenizer():
         return ''.join(chars)
     
 
-class BenchmarkTokenizer():
+class BenchmarkTokenizer:
     def __init__(self, data_dir='data.txt'):
-        self.data_dir = "data.txt"
-        self.text = open(data_dir, 'r', encoding='utf-8').read() # load all the data as simple string
+        self.data_dir = data_dir
+        with open(self.data_dir, 'r', encoding='utf-8') as f:
+            self.text = f.read()
 
-        # Get all unique characters in the text as vocabulary
-        self.chars = list(set(self.text))
+        # Criar vocab ordenado
+        self.chars = sorted(list(set(self.text)))
+        
+        self.unk_token = '<unk>'
+        if self.unk_token not in self.chars:
+            self.chars.append(self.unk_token)
+
         self.vocab_size = len(self.chars)
-
-        # build the character level tokenizer
-        self.chr_to_idx = {c:i for i, c in enumerate(self.chars)}
-        self.idx_to_chr = {i:c for i, c in enumerate(self.chars)}
+        
+        self.chr_to_idx = {c: i for i, c in enumerate(self.chars)}
+        self.idx_to_chr = {i: c for i, c in enumerate(self.chars)}
 
     def encode(self, input_text: str) -> list[int]:
-        return [self.chr_to_idx[t] for t in input_text]
+        return [self.chr_to_idx.get(t, self.chr_to_idx[self.unk_token]) for t in input_text]
 
     def decode(self, input_tokens: list[int]) -> str:
-        return "".join([self.idx_to_chr[i] for i in input_tokens])
+        return "".join([self.idx_to_chr.get(i, self.unk_token) for i in input_tokens])
     
 
 # DATASET SECTION
@@ -174,10 +236,10 @@ class FernandoDataLoader:
         # Capturar x e y, usando reshape para evitar
         x = (d[:-1]).view(b, c)
         y = (d[1:]).view(b, c)
-        if add_data != -1:
-            self.current_position += b * c
-        else:
-            self.current_position = 0
+
+        # Atualizar current_position corretamente
+        self.current_position = (self.current_position + b * c) % len(self.tokens)
+
         return x, y
 
 
@@ -209,6 +271,8 @@ class BenchmarkDataLoader:
         y = (d[1:]).view(b, c)  # targets
 
         self.current_position += b * c # set the next position
+        if self.current_position > len(self.tokens) - 1:
+            self.current_position = 0
         return x, y
 
 
@@ -279,8 +343,8 @@ def test_model_instanciation():
 def test_model_training():
     train_batch_size = 16  # training batch size
     eval_batch_size = 8  # evaluation batch size
-    context_length = 256  # number of tokens processed in a single batch
-    train_split = 0.8  # percentage of data to use from total data for training
+    context_length = 512  # number of tokens processed in a single batch
+    train_split = 0.7  # percentage of data to use from total data for training
 
     data_dir = "dataset/data.txt"
     tokenizer = FernandoTokenizer(data_dir)
@@ -289,7 +353,7 @@ def test_model_training():
 
     data = torch.tensor(tokenizer.encode(text), dtype=torch.long, device=device)
 
-    # split data into trian and eval
+    # split data into train and eval
     n_data = len(data)
     train_data = data[:int(n_data * train_split)]
     eval_data = data[int(n_data * train_split):]
@@ -299,13 +363,14 @@ def test_model_training():
 
     chars = list(set(text))
     vocab_size = len(chars)
-    d_model = vocab_size 
+    print(f"Vocab size: {vocab_size}")
+    d_model = 512 # vocab_size
 
     m = FernandoGPT(vocab_size=vocab_size, d_model=d_model).to(device)
     assert train_model(m, train_loader, eval_loader) == "Success."
 
     with torch.no_grad():
-        input = torch.tensor(tokenizer.encode("Love"), dtype=torch.long, device=device).unsqueeze(0)
+        input = torch.tensor(tokenizer.encode("Love you, my love"), dtype=torch.long, device=device).unsqueeze(0)
         prediction = tokenizer.decode(m.generate(input, max_len=500))
         print(prediction)
 
